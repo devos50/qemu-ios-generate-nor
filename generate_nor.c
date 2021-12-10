@@ -194,33 +194,23 @@ static void to_le(uint32_t *data, int words) {
 }
 
 static void calculate_img2_data_hash(void* buffer, int len, uint8_t* hash) {
-    printf("Computing data hash of content with length: %d\n", len);
-
 	SHA_CTX context;
 	SHA1_Init(&context);
 	SHA1_Update(&context, buffer, len & 0xffffffc0 + 0x20);
 	SHA1_Final(hash, &context);
-    to_le((uint32_t *)hash, 5);
-
-    // debugging - print some chars
-    printf("SHA1: ");
-    for(int i = 0; i < 20; i++) {
-        printf("%02x ", hash[i]);
-    }
-    printf("\n");
-
 	memcpy(hash + 20, Img2HashPadding, 64 - 20);
-    to_le(&hash[20], 11);
-
-    // debugging - print some chars
-
-    printf("ENC INPUT: ");
-    for(int i = 0; i < 64; i++) {
-        printf("0x%02x ", hash[i]);
-    }
-    printf("\n");
-    
 	aes_img2verify_encrypt(hash, 64, NULL);
+}
+
+static void calculate_img2_hash(Img2Header *header, uint8_t* hash) {
+    printf("Computing hash of IMG2 header\n");
+
+    SHA_CTX context;
+    SHA1_Init(&context);
+    SHA1_Update(&context, (uint8_t *)header, 0x3E0 & 0xffffffc0 + 0x20);
+    SHA1_Final(hash, &context);
+    memcpy(hash + 20, Img2HashPadding, 32 - 20);
+    aes_img2verify_encrypt(hash, 32, NULL);
 }
 
 int main(int argc, char *argv[]) {
@@ -257,31 +247,11 @@ int main(int argc, char *argv[]) {
     img_header->flags2 |= (1 << 1);  // this bit needs to be set to indicate that the content is encrypted
     printf("Flags: 0x%0x8\n", img_header->flags2);
 
-    // convert data to LE
     uint32_t *databuf = malloc(img_header->dataLenPadded);
     memcpy((void *)databuf, imgdata + sizeof(Img2Header), img_header->dataLenPadded);
 
     // calculate data hash
     calculate_img2_data_hash(databuf, img_header->dataLenPadded, img_header->data_hash);
-
-    // debugging - print some chars
-    printf("DATA HASH: ");
-    for(int i = 0; i < 64; i++) {
-        printf("%02x ", img_header->data_hash[i]);
-    }
-    printf("\n");
-
-    uint8_t dhash[0x40] = (uint8_t[]){0xc2, 0x7c, 0xbe, 0x3a, 0x28, 0x6c, 0x28, 0x3b,
-                                      0xe3, 0xa3, 0x2d, 0x3a, 0x09, 0xdc, 0xe1, 0x0a,
-                                      0x80, 0x3d, 0xb3, 0x01, 0xb0, 0xb9, 0x17, 0x7c,
-                                      0x14, 0x31, 0xc6, 0xbd, 0x2f, 0xb5, 0xed, 0xa0,
-                                      0x5a, 0x7f, 0x91, 0x62, 0x79, 0x0f, 0x1b, 0xca,
-                                      0x44, 0xec, 0xd7, 0x0f, 0x80, 0xf2, 0x00, 0xe5,
-                                      0x42, 0x43, 0xef, 0x9e, 0x81, 0xf2, 0xec, 0x66,
-                                      0x0e, 0x62, 0x9b, 0xf6, 0x2e, 0x9d, 0x28, 0xc4,
-                                     };
-
-    memcpy(&img_header->data_hash, &dhash, 0x40);
 
     // calculate CRC32 code of header
     img_header->header_checksum = crc32(img_header, 0x64);
@@ -294,13 +264,10 @@ int main(int argc, char *argv[]) {
     }
 
     // calculate header hash
-    uint8_t hash[0x20] = (uint8_t[]){0x70, 0x9b, 0x12, 0x35, 0x85, 0x49, 0x43, 0x74,
-                                     0x8b, 0x68, 0x78, 0x57, 0x62, 0xe1, 0x5f, 0xaf,
-                                     0x19, 0xf0, 0xdc, 0xeb, 0x3c, 0xb6, 0x9c, 0xfc,
-                                     0x6a, 0x1f, 0xc1, 0x01, 0x22, 0xf2, 0x1c, 0x2e
-                                     };
+    uint8_t header_hash[0x20];
+    calculate_img2_hash(img_header, header_hash);
 
-    memcpy(&img_header->hash, &hash, 0x20);
+    memcpy(&img_header->hash, &header_hash, 0x20);
 
     uint32_t img_offset = NOR_IMG_SECTION_OFFSET * NOR_BLOCK_SIZE;
     printf("Copying image to address %08x\n", img_offset);
