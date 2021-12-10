@@ -47,7 +47,7 @@ typedef struct Img2Header {
     uint32_t flags1;           /* 0xc */
     uint32_t dataLenPadded;    /* 0x10 */
     uint32_t dataLen;          /* 0x14 */
-    uint32_t allocation_size;         /* 0x18 */
+    uint32_t length_in_blocks;         /* 0x18 */
     uint32_t flags2;           /* 0x1c */ /* 0x01000000 has to be unset */
     uint8_t  data_hash[0x40];   /* 0x20 */
     uint32_t next_size;         /* 0x60 */
@@ -198,6 +198,15 @@ static void calculate_img2_data_hash(void* buffer, int len, uint8_t* hash) {
 	SHA1_Init(&context);
 	SHA1_Update(&context, buffer, len & 0xffffffc0 + 0x20);
 	SHA1_Final(hash, &context);
+
+    printf("Compute sha1 with length: %d\n", len);
+
+    printf("SHA1: ");
+    for(int i = 0; i < 20; i++) {
+        printf("%02x ", hash[i]);
+    }
+    printf("\n");
+
 	memcpy(hash + 20, Img2HashPadding, 64 - 20);
 	aes_img2verify_encrypt(hash, 64, NULL);
 }
@@ -213,25 +222,9 @@ static void calculate_img2_hash(Img2Header *header, uint8_t* hash) {
     aes_img2verify_encrypt(hash, 32, NULL);
 }
 
-int main(int argc, char *argv[]) {
-    aes_setup();
-    printf("Preparing NOR...\n");
-    
-    // prepare 1MB of nore
-    void *nor = malloc(NOR_SIZE);
-    memset(nor, 0x0, NOR_SIZE);
-    
-    // prepare the header
-    nor_header *header = malloc(sizeof(nor_header));
-    header->fourcc = 0x494d4732; // 2GMI
-    header->block_size = NOR_BLOCK_SIZE;
-    header->img_section_offset = NOR_IMG_SECTION_OFFSET;
-    header->img_section_len = 512 * 1024; // TODO hard-coded
-    header->checksum = crc32(header, 0x30);
-    memcpy(nor + NOR_IMG_HEADER_OFFSET, header, sizeof(nor_header));
-    
-    // add an IMG2 image (the device tree)
-    FILE *f = fopen("DeviceTree.n45ap", "rb");
+void add_img2(void *nor, char *filename, int *cur_block_ind) {
+    printf("Adding IMG2 %s\n", filename);
+    FILE *f = fopen(filename, "rb");
     fseek(f, 0, SEEK_END);
     long fsize = ftell(f);
     fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
@@ -241,8 +234,10 @@ int main(int argc, char *argv[]) {
     fclose(f);
     
     // modify header
-    printf("Device tree length (in bytes): %d\n", fsize);
+    printf("IMG2 length (in bytes): %d\n", fsize);
+    int img_length_in_blocks = (fsize / NOR_BLOCK_SIZE) + 5;
     Img2Header *img_header = (Img2Header *)imgdata;
+    img_header->length_in_blocks = img_length_in_blocks;
     img_header->flags2 |= (1 << 24); // this bit needs to be set to indicate a trusted write
     img_header->flags2 |= (1 << 1);  // this bit needs to be set to indicate that the content is encrypted
     printf("Flags: 0x%0x8\n", img_header->flags2);
@@ -269,9 +264,43 @@ int main(int argc, char *argv[]) {
 
     memcpy(&img_header->hash, &header_hash, 0x20);
 
-    uint32_t img_offset = NOR_IMG_SECTION_OFFSET * NOR_BLOCK_SIZE;
-    printf("Copying image to address %08x\n", img_offset);
-    memcpy(nor + img_offset, imgdata, fsize);
+    uint32_t img_section_offset = NOR_IMG_SECTION_OFFSET * NOR_BLOCK_SIZE;
+    uint32_t addr_offset = img_section_offset + *cur_block_ind * NOR_BLOCK_SIZE;
+    printf("Copying image to address 0x%08x\n", addr_offset);
+    memcpy(nor + addr_offset, imgdata, fsize);
+    (*cur_block_ind) += img_length_in_blocks;
+}
+
+void setup_img2_partition(void *nor) {
+    // prepare the header
+    nor_header *header = malloc(sizeof(nor_header));
+    header->fourcc = 0x494d4732; // 2GMI
+    header->block_size = NOR_BLOCK_SIZE;
+    header->img_section_offset = NOR_IMG_SECTION_OFFSET;
+    header->img_section_len = 512 * 1024; // TODO hard-coded
+    header->checksum = crc32(header, 0x30);
+    memcpy(nor + NOR_IMG_HEADER_OFFSET, header, sizeof(nor_header));
+    
+    // add IMG2 images
+    int cur_block_ind = 0; // the current block index, counted from the img2 partition start
+    //add_img2(nor, "DeviceTree.n45ap", &cur_block_ind);
+    //add_img2(nor, "batterycharging", &cur_block_ind);
+    add_img2(nor, "applelogo", &cur_block_ind);
+    //add_img2(nor, "recoverymode", &cur_block_ind);
+    //add_img2(nor, "needservice", &cur_block_ind);
+    //add_img2(nor, "batterylow0", &cur_block_ind);
+    //add_img2(nor, "batterylow1", &cur_block_ind);
+}
+
+int main(int argc, char *argv[]) {
+    aes_setup();
+    printf("Preparing NOR...\n");
+    
+    // prepare 1MB of nore
+    void *nor = malloc(NOR_SIZE);
+    memset(nor, 0x0, NOR_SIZE);
+    
+    setup_img2_partition(nor);
 
     // prepare syscfg
     SyscfgHeader *syscfg_header = malloc(sizeof(SyscfgHeader));
@@ -330,7 +359,7 @@ int main(int argc, char *argv[]) {
     memcpy(nor + NVRAM_START, nvram_data, NVRAM_SIZE);
 
     // write NOR
-    f = fopen("nor.bin", "wb");
+    FILE *f = fopen("nor.bin", "wb");
     fwrite(nor, sizeof(char), NOR_SIZE, f);
     fclose(f);
     
