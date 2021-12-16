@@ -196,16 +196,8 @@ static void to_le(uint32_t *data, int words) {
 static void calculate_img2_data_hash(void* buffer, int len, uint8_t* hash) {
 	SHA_CTX context;
 	SHA1_Init(&context);
-	SHA1_Update(&context, buffer, len & 0xffffffc0 + 0x20);
+	SHA1_Update(&context, buffer, len);
 	SHA1_Final(hash, &context);
-
-    printf("Compute sha1 with length: %d\n", len);
-
-    printf("SHA1: ");
-    for(int i = 0; i < 20; i++) {
-        printf("%02x ", hash[i]);
-    }
-    printf("\n");
 
 	memcpy(hash + 20, Img2HashPadding, 64 - 20);
 	aes_img2verify_encrypt(hash, 64, NULL);
@@ -216,8 +208,9 @@ static void calculate_img2_hash(Img2Header *header, uint8_t* hash) {
 
     SHA_CTX context;
     SHA1_Init(&context);
-    SHA1_Update(&context, (uint8_t *)header, 0x3E0 & 0xffffffc0 + 0x20);
+    SHA1_Update(&context, (uint8_t *)header, 0x3E0);
     SHA1_Final(hash, &context);
+
     memcpy(hash + 20, Img2HashPadding, 32 - 20);
     aes_img2verify_encrypt(hash, 32, NULL);
 }
@@ -283,13 +276,13 @@ void setup_img2_partition(void *nor) {
     
     // add IMG2 images
     int cur_block_ind = 0; // the current block index, counted from the img2 partition start
-    //add_img2(nor, "DeviceTree.n45ap", &cur_block_ind);
-    //add_img2(nor, "batterycharging", &cur_block_ind);
+    add_img2(nor, "DeviceTree.n45ap", &cur_block_ind);
+    add_img2(nor, "batterycharging", &cur_block_ind);
     add_img2(nor, "applelogo", &cur_block_ind);
-    //add_img2(nor, "recoverymode", &cur_block_ind);
-    //add_img2(nor, "needservice", &cur_block_ind);
-    //add_img2(nor, "batterylow0", &cur_block_ind);
-    //add_img2(nor, "batterylow1", &cur_block_ind);
+    add_img2(nor, "needservice", &cur_block_ind);
+    add_img2(nor, "batterylow0", &cur_block_ind);
+    add_img2(nor, "batterylow1", &cur_block_ind);
+    add_img2(nor, "recoverymode", &cur_block_ind);
 }
 
 int main(int argc, char *argv[]) {
