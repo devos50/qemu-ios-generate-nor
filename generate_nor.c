@@ -276,13 +276,13 @@ void setup_img2_partition(void *nor) {
     
     // add IMG2 images
     int cur_block_ind = 0; // the current block index, counted from the img2 partition start
-    add_img2(nor, "DeviceTree.n45ap", &cur_block_ind);
-    add_img2(nor, "batterycharging", &cur_block_ind);
-    add_img2(nor, "applelogo", &cur_block_ind);
-    add_img2(nor, "needservice", &cur_block_ind);
-    add_img2(nor, "batterylow0", &cur_block_ind);
-    add_img2(nor, "batterylow1", &cur_block_ind);
-    add_img2(nor, "recoverymode", &cur_block_ind);
+    add_img2(nor, "data/DeviceTree.n45ap", &cur_block_ind);
+    add_img2(nor, "data/batterycharging", &cur_block_ind);
+    add_img2(nor, "data/applelogo", &cur_block_ind);
+    add_img2(nor, "data/needservice", &cur_block_ind);
+    add_img2(nor, "data/batterylow0", &cur_block_ind);
+    add_img2(nor, "data/batterylow1", &cur_block_ind);
+    add_img2(nor, "data/recoverymode", &cur_block_ind);
 }
 
 int main(int argc, char *argv[]) {
