@@ -194,6 +194,9 @@ static void to_le(uint32_t *data, int words) {
 }
 
 static void calculate_img2_data_hash(void* buffer, int len, uint8_t* hash) {
+    /*
+    Compute the hash over the IMG2 data.
+    */
 	SHA_CTX context;
 	SHA1_Init(&context);
 	SHA1_Update(&context, buffer, len);
@@ -227,13 +230,16 @@ void add_img2(void *nor, char *filename, int *cur_block_ind) {
     fclose(f);
     
     // modify header
-    printf("IMG2 length (in bytes): %ld\n", fsize);
+    printf("Raw IMG2 length (in bytes): %ld\n", fsize);
     int img_length_in_blocks = (fsize / NOR_BLOCK_SIZE) + 5;
     Img2Header *img_header = (Img2Header *)imgdata;
     img_header->length_in_blocks = img_length_in_blocks;
     img_header->flags2 |= (1 << 24); // this bit needs to be set to indicate a trusted write
     img_header->flags2 |= (1 << 1);  // this bit needs to be set to indicate that the content is encrypted
+    printf("--- IMG2 info ---\n");
+    printf("Data length: %d (padded: %d)\n", img_header->dataLen, img_header->dataLenPadded);
     printf("Flags: 0x%0x8\n", img_header->flags2);
+    printf("\n");
 
     uint32_t *databuf = malloc(img_header->dataLenPadded);
     memcpy((void *)databuf, imgdata + sizeof(Img2Header), img_header->dataLenPadded);
@@ -262,6 +268,7 @@ void add_img2(void *nor, char *filename, int *cur_block_ind) {
     printf("Copying image to address 0x%08x\n", addr_offset);
     memcpy(nor + addr_offset, imgdata, fsize);
     (*cur_block_ind) += img_length_in_blocks;
+    printf("\n");
 }
 
 void setup_img2_partition(void *nor) {
@@ -276,12 +283,12 @@ void setup_img2_partition(void *nor) {
     
     // add IMG2 images
     int cur_block_ind = 0; // the current block index, counted from the img2 partition start
-    //add_img2(nor, "data/DeviceTree.n45ap", &cur_block_ind);
-    //add_img2(nor, "data/batterycharging", &cur_block_ind);
+    add_img2(nor, "data/DeviceTree.n45ap", &cur_block_ind);
+    add_img2(nor, "data/batterycharging", &cur_block_ind);
     add_img2(nor, "data/applelogo", &cur_block_ind);
-    //add_img2(nor, "data/needservice", &cur_block_ind);
-    //add_img2(nor, "data/batterylow0", &cur_block_ind);
-    //add_img2(nor, "data/batterylow1", &cur_block_ind);
+    add_img2(nor, "data/needservice", &cur_block_ind);
+    add_img2(nor, "data/batterylow0", &cur_block_ind);
+    add_img2(nor, "data/batterylow1", &cur_block_ind);
     add_img2(nor, "data/recoverymode", &cur_block_ind);
 }
 
@@ -289,7 +296,7 @@ int main(int argc, char *argv[]) {
     aes_setup();
     printf("Preparing NOR...\n");
     
-    // prepare 1MB of nore
+    // prepare 1MB of nor
     void *nor = malloc(NOR_SIZE);
     memset(nor, 0x0, NOR_SIZE);
     
