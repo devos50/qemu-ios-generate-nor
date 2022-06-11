@@ -227,7 +227,7 @@ void add_img2(void *nor, char *filename, int *cur_block_ind) {
     fclose(f);
     
     // modify header
-    printf("IMG2 length (in bytes): %d\n", fsize);
+    printf("IMG2 length (in bytes): %ld\n", fsize);
     int img_length_in_blocks = (fsize / NOR_BLOCK_SIZE) + 5;
     Img2Header *img_header = (Img2Header *)imgdata;
     img_header->length_in_blocks = img_length_in_blocks;
@@ -242,7 +242,7 @@ void add_img2(void *nor, char *filename, int *cur_block_ind) {
     calculate_img2_data_hash(databuf, img_header->dataLenPadded, img_header->data_hash);
 
     // calculate CRC32 code of header
-    img_header->header_checksum = crc32(img_header, 0x64);
+    img_header->header_checksum = crc32((uint8_t *)img_header, 0x64);
     if(img_header->flags2 & (1 << 30))
     {
         printf("Extension found with size %d and options 0x%0x8\n", img_header->next_size, img_header->extension_options);
@@ -271,17 +271,17 @@ void setup_img2_partition(void *nor) {
     header->block_size = NOR_BLOCK_SIZE;
     header->img_section_offset = NOR_IMG_SECTION_OFFSET;
     header->img_section_len = 512 * 1024; // TODO hard-coded
-    header->checksum = crc32(header, 0x30);
+    header->checksum = crc32((uint8_t *)header, 0x30);
     memcpy(nor + NOR_IMG_HEADER_OFFSET, header, sizeof(nor_header));
     
     // add IMG2 images
     int cur_block_ind = 0; // the current block index, counted from the img2 partition start
-    add_img2(nor, "data/DeviceTree.n45ap", &cur_block_ind);
-    add_img2(nor, "data/batterycharging", &cur_block_ind);
+    //add_img2(nor, "data/DeviceTree.n45ap", &cur_block_ind);
+    //add_img2(nor, "data/batterycharging", &cur_block_ind);
     add_img2(nor, "data/applelogo", &cur_block_ind);
-    add_img2(nor, "data/needservice", &cur_block_ind);
-    add_img2(nor, "data/batterylow0", &cur_block_ind);
-    add_img2(nor, "data/batterylow1", &cur_block_ind);
+    //add_img2(nor, "data/needservice", &cur_block_ind);
+    //add_img2(nor, "data/batterylow0", &cur_block_ind);
+    //add_img2(nor, "data/batterylow1", &cur_block_ind);
     add_img2(nor, "data/recoverymode", &cur_block_ind);
 }
 
@@ -328,21 +328,21 @@ int main(int argc, char *argv[]) {
     partition_header->sig = 0x70;
     partition_header->len = 0x80;
     memcpy(partition_header->name, &NVRAM_COMMON_PARTITION_NAME, sizeof(NVRAM_COMMON_PARTITION_NAME));
-    partition_header->cksum = compute_nvram_header_checkbit(partition_header);
+    partition_header->cksum = compute_nvram_header_checkbit((apple_nvram_header *) partition_header);
 
     // create the "panic info" partition
     chrp_nvram_header *panic_partition_header = (chrp_nvram_header *)(nvram_data + sizeof(apple_nvram_header) + 0x800);
     panic_partition_header->sig = 0xA1;
     panic_partition_header->len = 0x81;
     memcpy(panic_partition_header->name, &NVRAM_PANIC_INFO_PARTITION_NAME, sizeof(NVRAM_PANIC_INFO_PARTITION_NAME));
-    panic_partition_header->cksum = compute_nvram_header_checkbit(panic_partition_header);
+    panic_partition_header->cksum = compute_nvram_header_checkbit((apple_nvram_header *) panic_partition_header);
 
     // create the "free" partition
     chrp_nvram_header *free_partition_header = (chrp_nvram_header *)(nvram_data + 0x1030);
     free_partition_header->sig = 0x7F;
     free_partition_header->len = 0xFD;
     memcpy(free_partition_header->name, &NVRAM_FREE_PARTITION_NAME, sizeof(NVRAM_FREE_PARTITION_NAME));
-    free_partition_header->cksum = compute_nvram_header_checkbit(free_partition_header);
+    free_partition_header->cksum = compute_nvram_header_checkbit((apple_nvram_header *) free_partition_header);
 
     // update header checksums
     nvram_header->adler = adler32(nvram_data + 0x14, NVRAM_SIZE - 0x14);
