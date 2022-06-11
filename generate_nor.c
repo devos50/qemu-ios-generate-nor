@@ -330,7 +330,7 @@ int main(int argc, char *argv[]) {
 
     // create "common" partition with env variables
     chrp_nvram_header *partition_header = (chrp_nvram_header *)(nvram_data + sizeof(apple_nvram_header));
-    char *env = "boot-args=debug=0x8 kextlog=0xfff cpus=1 rd=md0 serial=1 io=0x8 nand-enable-adm=0";
+    char *env = "boot-args=debug=0x8 kextlog=0xfff cpus=1 rd=disk0s1 serial=1 io=0xffff8fff";
     memcpy(partition_header->data, env, strlen(env) + 1);
     partition_header->sig = 0x70;
     partition_header->len = 0x80;
