@@ -3,14 +3,16 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <stdint.h>
+#include <math.h>
+#include <openssl/aes.h>
 #include <openssl/sha.h>
 #include "aes.h"
 
 #define NOR_SIZE 1024 * 1024
-#define NOR_BLOCK_SIZE 0x40
+#define NOR_BLOCK_SIZE 65536  // 64 KB
 #define NOR_SYSCFG_HEADER_OFFSET 0x4000
-#define NOR_IMG_HEADER_OFFSET 0x8400
-#define NOR_IMG_SECTION_OFFSET 1040  // in blocks
+#define NOR_IMG_HEADER_OFFSET 0x0
+#define NOR_IMG_SECTION_OFFSET 2  // in blocks
 
 #define NUM_SYSCFG_ENTRIES 4
 
@@ -28,6 +30,8 @@ static const uint8_t Img2HashPadding[] = {  0xAD, 0x2E, 0xE3, 0x8D, 0x2D, 0x9B, 
 
 static uint32_t crc32_table[256];
 static int crc32_table_computed = 0;
+
+#define key_uid ((uint8_t[]){0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF})
 
 typedef struct nor_header {
     uint32_t fourcc;
@@ -59,6 +63,12 @@ typedef struct Img2Header {
     uint8_t  unknown5[0x368]; /* 0x68 */
     uint8_t hash[0x20];
 } Img2Header;
+
+typedef struct Img3Header {
+    uint32_t magic;
+    uint32_t size;
+    uint32_t dataSize;
+} Img3Header;
 
 typedef struct SyscfgHeader {
     uint32_t shMagic;
@@ -218,6 +228,76 @@ static void calculate_img2_hash(Img2Header *header, uint8_t* hash) {
     aes_img2verify_encrypt(hash, 32, NULL);
 }
 
+void add_img3(void *nor, char *filename, int *cur_block_ind) {
+    printf("Adding IMG3 %s\n", filename);
+    FILE *f = fopen(filename, "rb");
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
+
+    char *imgdata = malloc(fsize);
+    fread(imgdata, 1, fsize, f);
+    fclose(f);
+
+    // modify header
+    int img_length_in_blocks = ceil((float)fsize / (float)NOR_BLOCK_SIZE);
+    printf("Raw IMG3 length (in bytes): %ld, in blocks: %ld\n", fsize, img_length_in_blocks);
+    Img3Header *img_header = (Img3Header *)imgdata;
+    printf("--- IMG3 info ---\n");
+    printf("Data length: %d (padded: %d)\n", img_header->size, img_header->dataSize);
+    printf("\n");
+    img_header->size = img_length_in_blocks * NOR_BLOCK_SIZE; // the images should be aligned to a block
+
+    // If we're adding the iBoot image, we have to encrypt the signed hash
+    if(strcmp(filename, "data/iboot.img3") == 0) {
+        printf("Encrypting hash...\n");
+        unsigned char   derivedSeed[16] = {0xdb, 0x1f, 0x5b, 0x33, 0x60, 0x6c, 0x5f, 0x1c, 0x19, 0x34, 0xaa, 0x66, 0x58, 0x9c, 0x06, 0x61};
+        unsigned char   derivedKey[16];
+
+        /* derive the key */
+        AES_KEY encryptKey, decryptKey;
+        AES_set_decrypt_key(key_uid, sizeof(key_uid) * 8, &encryptKey);
+        uint8_t ivec[16] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+        AES_cbc_encrypt(derivedSeed, derivedKey, 16, &encryptKey, &ivec, AES_DECRYPT);
+
+        printf("Derived key: 0x");
+        for(int i = 0; i < 16; i++) { printf("%02x", derivedKey[i]); }
+        printf("\n");
+
+        printf("Plaintext hash: 0x");
+        for(int i = 0; i < 128; i++) { printf("%02x", ((uint8_t *)imgdata)[168108 + i]); }
+        printf("\n");
+
+        // encrypt the signature using the derived key
+        AES_set_encrypt_key(derivedKey, sizeof(key_uid) * 8, &encryptKey);
+        uint8_t ivec2[16] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+        uint8_t res[128];
+        AES_cbc_encrypt(&imgdata[168108], &imgdata[168108], 0x80, &encryptKey, &ivec2, AES_ENCRYPT);
+
+        printf("Encrypted hash: 0x");
+        for(int i = 0; i < 128; i++) { printf("%02x", ((uint8_t *)imgdata)[168108 + i]); }
+        printf("\n");
+
+        // // decrypt again
+        // AES_set_decrypt_key(derivedKey, sizeof(key_uid) * 8, &decryptKey);
+        // uint8_t res2[128];
+        // uint8_t ivec3[16] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+        // AES_cbc_encrypt(&imgdata[168108], &imgdata[168108], 0x80, &decryptKey, &ivec3, AES_DECRYPT);
+
+        // printf("Decrypted hash: 0x");
+        // for(int i = 0; i < 128; i++) { printf("%02x", ((uint8_t *)imgdata)[168108 + i]); }
+        // printf("\n");
+    }
+
+    // copy image
+    uint32_t img_section_offset = NOR_IMG_SECTION_OFFSET * NOR_BLOCK_SIZE;
+    uint32_t addr_offset = img_section_offset + *cur_block_ind * NOR_BLOCK_SIZE;
+    printf("Copying image to address 0x%08x\n", addr_offset);
+    memcpy(nor + addr_offset, imgdata, fsize);
+    (*cur_block_ind) += img_length_in_blocks;
+    printf("\n");
+}
+
 void add_img2(void *nor, char *filename, int *cur_block_ind) {
     printf("Adding IMG2 %s\n", filename);
     FILE *f = fopen(filename, "rb");
@@ -277,19 +357,24 @@ void setup_img2_partition(void *nor) {
     header->fourcc = 0x494d4732; // 2GMI
     header->block_size = NOR_BLOCK_SIZE;
     header->img_section_offset = NOR_IMG_SECTION_OFFSET;
-    header->img_section_len = 512 * 1024; // TODO hard-coded
+    // header->img_section_blk_location = 0x200;
+    
+    // add IMG3 images
+    int cur_block_ind = 0; // the current block index, counted from the img2 partition start
+    add_img3(nor, "data/llb.img3", &cur_block_ind);
+    add_img3(nor, "data/iboot.img3", &cur_block_ind);
+    add_img3(nor, "data/dtree.img3", &cur_block_ind);
+    add_img3(nor, "data/applelogo.img3", &cur_block_ind);
+    add_img3(nor, "data/needservice.img3", &cur_block_ind);
+    add_img3(nor, "data/batterylow0.img3", &cur_block_ind);
+    add_img3(nor, "data/batterylow1.img3", &cur_block_ind);
+    add_img3(nor, "data/recoverymode.img3", &cur_block_ind);
+    add_img3(nor, "data/glyphcharging.img3", &cur_block_ind);
+    add_img3(nor, "data/glyphplugin.img3", &cur_block_ind);
+
+    header->img_section_len = cur_block_ind; // TODO hard-coded
     header->checksum = crc32((uint8_t *)header, 0x30);
     memcpy(nor + NOR_IMG_HEADER_OFFSET, header, sizeof(nor_header));
-    
-    // add IMG2 images
-    int cur_block_ind = 0; // the current block index, counted from the img2 partition start
-    add_img2(nor, "data/DeviceTree.n45ap", &cur_block_ind);
-    add_img2(nor, "data/batterycharging", &cur_block_ind);
-    add_img2(nor, "data/applelogo", &cur_block_ind);
-    add_img2(nor, "data/needservice", &cur_block_ind);
-    add_img2(nor, "data/batterylow0", &cur_block_ind);
-    add_img2(nor, "data/batterylow1", &cur_block_ind);
-    add_img2(nor, "data/recoverymode", &cur_block_ind);
 }
 
 int main(int argc, char *argv[]) {
@@ -302,19 +387,19 @@ int main(int argc, char *argv[]) {
     
     setup_img2_partition(nor);
 
-    // prepare syscfg
-    SyscfgHeader *syscfg_header = malloc(sizeof(SyscfgHeader));
-    syscfg_header->shMagic = 'SCfg';
-    syscfg_header->maxSize = 0x2000;
-    syscfg_header->version = 0x00010001;
-    syscfg_header->shSize = 200;
-    syscfg_header->keyCount = NUM_SYSCFG_ENTRIES;
-    memcpy(nor + NOR_SYSCFG_HEADER_OFFSET, syscfg_header, sizeof(SyscfgHeader));
+    // // prepare syscfg
+    // SyscfgHeader *syscfg_header = malloc(sizeof(SyscfgHeader));
+    // syscfg_header->shMagic = 'SCfg';
+    // syscfg_header->maxSize = 0x2000;
+    // syscfg_header->version = 0x00010001;
+    // syscfg_header->shSize = 200;
+    // syscfg_header->keyCount = NUM_SYSCFG_ENTRIES;
+    // memcpy(nor + NOR_SYSCFG_HEADER_OFFSET, syscfg_header, sizeof(SyscfgHeader));
 
-    // write syscfg entries
-    for(int index = 0; index < NUM_SYSCFG_ENTRIES; index++) {
-        memcpy(nor + NOR_SYSCFG_HEADER_OFFSET + sizeof(SyscfgHeader) + sizeof(SyscfgEntry) * index, &syscfg_entries[index], sizeof(SyscfgEntry));
-    }
+    // // write syscfg entries
+    // for(int index = 0; index < NUM_SYSCFG_ENTRIES; index++) {
+    //     memcpy(nor + NOR_SYSCFG_HEADER_OFFSET + sizeof(SyscfgHeader) + sizeof(SyscfgEntry) * index, &syscfg_entries[index], sizeof(SyscfgEntry));
+    // }
 
     // prepare NVRAM
     printf("Preparing NVRAM...\n");
@@ -330,7 +415,7 @@ int main(int argc, char *argv[]) {
 
     // create "common" partition with env variables
     chrp_nvram_header *partition_header = (chrp_nvram_header *)(nvram_data + sizeof(apple_nvram_header));
-    char *env = "boot-args=debug=0x8 kextlog=0xfff cpus=1 rd=disk0s1 serial=1 io=0xffff8fff";
+    char *env = "debug-uarts=1";
     memcpy(partition_header->data, env, strlen(env) + 1);
     partition_header->sig = 0x70;
     partition_header->len = 0x80;
