@@ -9,10 +9,10 @@
 #include "aes.h"
 
 #define NOR_SIZE 1024 * 1024
-#define NOR_BLOCK_SIZE 65536  // 64 KB
+#define NOR_BLOCK_SIZE 64  // 64 bytes
 #define NOR_SYSCFG_HEADER_OFFSET 0x4000
-#define NOR_IMG_HEADER_OFFSET 0x0
-#define NOR_IMG_SECTION_OFFSET 2  // in blocks
+#define NOR_IMG_HEADER_OFFSET 0x200
+#define NOR_IMG_SECTION_OFFSET 0x0  // in blocks
 
 #define NUM_SYSCFG_ENTRIES 4
 
@@ -298,69 +298,16 @@ void add_img3(void *nor, char *filename, int *cur_block_ind) {
     printf("\n");
 }
 
-void add_img2(void *nor, char *filename, int *cur_block_ind) {
-    printf("Adding IMG2 %s\n", filename);
-    FILE *f = fopen(filename, "rb");
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);  /* same as rewind(f); */
-
-    char *imgdata = malloc(fsize);
-    fread(imgdata, 1, fsize, f);
-    fclose(f);
-    
-    // modify header
-    printf("Raw IMG2 length (in bytes): %ld\n", fsize);
-    int img_length_in_blocks = (fsize / NOR_BLOCK_SIZE) + 5;
-    Img2Header *img_header = (Img2Header *)imgdata;
-    img_header->length_in_blocks = img_length_in_blocks;
-    img_header->flags2 |= (1 << 24); // this bit needs to be set to indicate a trusted write
-    img_header->flags2 |= (1 << 1);  // this bit needs to be set to indicate that the content is encrypted
-    printf("--- IMG2 info ---\n");
-    printf("Data length: %d (padded: %d)\n", img_header->dataLen, img_header->dataLenPadded);
-    printf("Flags: 0x%0x8\n", img_header->flags2);
-    printf("\n");
-
-    uint32_t *databuf = malloc(img_header->dataLenPadded);
-    memcpy((void *)databuf, imgdata + sizeof(Img2Header), img_header->dataLenPadded);
-
-    // calculate data hash
-    calculate_img2_data_hash(databuf, img_header->dataLenPadded, img_header->data_hash);
-
-    // calculate CRC32 code of header
-    img_header->header_checksum = crc32((uint8_t *)img_header, 0x64);
-    if(img_header->flags2 & (1 << 30))
-    {
-        printf("Extension found with size %d and options 0x%0x8\n", img_header->next_size, img_header->extension_options);
-        uint8_t *buf = malloc(img_header->next_size);
-        memcpy(buf, (uint8_t*)img_header + 0x6c, img_header->next_size);
-        img_header->extension_checksum = crc32(buf, img_header->next_size);
-    }
-
-    // calculate header hash
-    uint8_t header_hash[0x20];
-    calculate_img2_hash(img_header, header_hash);
-
-    memcpy(&img_header->hash, &header_hash, 0x20);
-
-    uint32_t img_section_offset = NOR_IMG_SECTION_OFFSET * NOR_BLOCK_SIZE;
-    uint32_t addr_offset = img_section_offset + *cur_block_ind * NOR_BLOCK_SIZE;
-    printf("Copying image to address 0x%08x\n", addr_offset);
-    memcpy(nor + addr_offset, imgdata, fsize);
-    (*cur_block_ind) += img_length_in_blocks;
-    printf("\n");
-}
-
-void setup_img2_partition(void *nor) {
+void setup_nor_partition(void *nor) {
     // prepare the header
     nor_header *header = malloc(sizeof(nor_header));
     header->fourcc = 0x494d4732; // 2GMI
     header->block_size = NOR_BLOCK_SIZE;
     header->img_section_offset = NOR_IMG_SECTION_OFFSET;
-    // header->img_section_blk_location = 0x200;
+    header->img_section_blk_location = NOR_IMG_HEADER_OFFSET;
     
     // add IMG3 images
-    int cur_block_ind = 0; // the current block index, counted from the img2 partition start
+    int cur_block_ind = NOR_IMG_HEADER_OFFSET; // the current block index, counted from the img2 partition start
     add_img3(nor, "data/llb.img3", &cur_block_ind);
     add_img3(nor, "data/iboot.img3", &cur_block_ind);
     add_img3(nor, "data/dtree.img3", &cur_block_ind);
@@ -374,7 +321,7 @@ void setup_img2_partition(void *nor) {
 
     header->img_section_len = cur_block_ind; // TODO hard-coded
     header->checksum = crc32((uint8_t *)header, 0x30);
-    memcpy(nor + NOR_IMG_HEADER_OFFSET, header, sizeof(nor_header));
+    memcpy(nor, header, sizeof(nor_header));
 }
 
 int main(int argc, char *argv[]) {
@@ -385,7 +332,7 @@ int main(int argc, char *argv[]) {
     void *nor = malloc(NOR_SIZE);
     memset(nor, 0x0, NOR_SIZE);
     
-    setup_img2_partition(nor);
+    setup_nor_partition(nor);
 
     // // prepare syscfg
     // SyscfgHeader *syscfg_header = malloc(sizeof(SyscfgHeader));
