@@ -1,0 +1,3 @@
+[submodule "decryptor"]
+	path = decryptor
+	url = https://github.com/zoe-vb/8900decryptor
