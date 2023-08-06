@@ -1,4 +1,7 @@
-Compile with:
+#### If you want a shell with serial please view the Single User Mode branch.
+
+
+# Usage
 
 `gcc generate_nor.c aes.c -o generate_nor -I/usr/local/Cellar/openssl@1.1/1.1.1l/include -L/usr/local/Cellar/openssl@1.1/1.1.1l/lib -lssl -lcrypto`
 
