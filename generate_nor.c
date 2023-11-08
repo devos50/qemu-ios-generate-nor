@@ -84,10 +84,11 @@ typedef struct SyscfgEntry {
         char        seData[16];
 } SyscfgEntry;
 
-SyscfgEntry syscfg_entries[NUM_SYSCFG_ENTRIES] = { {'Mod#', "MA623" },
-                                                   {'Regn', "B/LL" },
-                                                   {'SrNm', "ABCDEFG" },
-                                                   {'Batt', "690476146348"}};
+SyscfgEntry syscfg_entries[NUM_SYSCFG_ENTRIES] = {
+    {'Mod#', "MA623" },
+    {'Regn', "B/LL" },
+    {'SrNm', "1A8478BH203" },
+    {'Batt', "690476146348"}};
 
 typedef struct chrp_nvram_header {
         uint8_t sig;
@@ -335,18 +336,19 @@ int main(int argc, char *argv[]) {
     setup_nor_partition(nor);
 
     // // prepare syscfg
-    // SyscfgHeader *syscfg_header = malloc(sizeof(SyscfgHeader));
-    // syscfg_header->shMagic = 'SCfg';
-    // syscfg_header->maxSize = 0x2000;
-    // syscfg_header->version = 0x00010001;
-    // syscfg_header->shSize = 200;
-    // syscfg_header->keyCount = NUM_SYSCFG_ENTRIES;
-    // memcpy(nor + NOR_SYSCFG_HEADER_OFFSET, syscfg_header, sizeof(SyscfgHeader));
+    printf("Preparing SYSCFG...\n");
+    SyscfgHeader *syscfg_header = malloc(sizeof(SyscfgHeader));
+    syscfg_header->shMagic = 'SCfg';
+    syscfg_header->maxSize = 0x2000;
+    syscfg_header->version = 0x00010001;
+    syscfg_header->shSize = 200;
+    syscfg_header->keyCount = NUM_SYSCFG_ENTRIES;
+    memcpy(nor + NOR_SYSCFG_HEADER_OFFSET, syscfg_header, sizeof(SyscfgHeader));
 
-    // // write syscfg entries
-    // for(int index = 0; index < NUM_SYSCFG_ENTRIES; index++) {
-    //     memcpy(nor + NOR_SYSCFG_HEADER_OFFSET + sizeof(SyscfgHeader) + sizeof(SyscfgEntry) * index, &syscfg_entries[index], sizeof(SyscfgEntry));
-    // }
+    // write syscfg entries
+    for(int index = 0; index < NUM_SYSCFG_ENTRIES; index++) {
+        memcpy(nor + NOR_SYSCFG_HEADER_OFFSET + sizeof(SyscfgHeader) + sizeof(SyscfgEntry) * index, &syscfg_entries[index], sizeof(SyscfgEntry));
+    }
 
     // prepare NVRAM
     printf("Preparing NVRAM...\n");
@@ -362,8 +364,8 @@ int main(int argc, char *argv[]) {
 
     // create "common" partition with env variables
     chrp_nvram_header *partition_header = (chrp_nvram_header *)(nvram_data + sizeof(apple_nvram_header));
-    char *env = "debug-uarts=1";
-    memcpy(partition_header->data, env, strlen(env) + 1);
+    char *env = "debug-uarts=1\0btaddr=00:23:32:6B:38:E2\0wifiaddr=00:23:32:6E:AA:10";
+    memcpy(partition_header->data, env, strlen(env) + 52);
     partition_header->sig = 0x70;
     partition_header->len = 0x80;
     memcpy(partition_header->name, &NVRAM_COMMON_PARTITION_NAME, sizeof(NVRAM_COMMON_PARTITION_NAME));
