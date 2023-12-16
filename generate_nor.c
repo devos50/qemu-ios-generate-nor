@@ -80,7 +80,7 @@ typedef struct SyscfgHeader {
 } SyscfgHeader;
 
 typedef struct SyscfgEntry {
-        u_int32_t       seTag;
+        uint32_t       seTag;
         char        seData[16];
 } SyscfgEntry;
 
