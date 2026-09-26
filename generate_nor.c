@@ -249,45 +249,27 @@ void add_img3(void *nor, char *filename, int *cur_block_ind) {
     printf("\n");
     img_header->size = img_length_in_blocks * NOR_BLOCK_SIZE; // the images should be aligned to a block
 
-    // If we're adding the iBoot image, we have to encrypt the signed hash
-    if(strcmp(filename, "data/iboot.img3") == 0) {
-        printf("Encrypting hash...\n");
-        unsigned char   derivedSeed[16] = {0xdb, 0x1f, 0x5b, 0x33, 0x60, 0x6c, 0x5f, 0x1c, 0x19, 0x34, 0xaa, 0x66, 0x58, 0x9c, 0x06, 0x61};
-        unsigned char   derivedKey[16];
+    // Images in NOR are personalized: the boot chain decrypts the signature (SHSH tag) with a key derived from the UID
+    // key before verifying it, so encrypt it with that key.
+    uint32_t tag_offset = 0x14;
+    while(tag_offset + 12 <= fsize) {
+        uint32_t *tag = (uint32_t *)&imgdata[tag_offset];
+        if(tag[0] == 0x53485348) { // SHSH
+            unsigned char derivedSeed[16] = {0xdb, 0x1f, 0x5b, 0x33, 0x60, 0x6c, 0x5f, 0x1c, 0x19, 0x34, 0xaa, 0x66, 0x58, 0x9c, 0x06, 0x61};
+            unsigned char derivedKey[16];
+            AES_KEY key;
+            uint8_t ivec[16] = {0};
+            AES_set_decrypt_key(key_uid, sizeof(key_uid) * 8, &key);
+            AES_cbc_encrypt(derivedSeed, derivedKey, 16, &key, ivec, AES_DECRYPT);
 
-        /* derive the key */
-        AES_KEY encryptKey, decryptKey;
-        AES_set_decrypt_key(key_uid, sizeof(key_uid) * 8, &encryptKey);
-        uint8_t ivec[16] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
-        AES_cbc_encrypt(derivedSeed, derivedKey, 16, &encryptKey, &ivec, AES_DECRYPT);
-
-        printf("Derived key: 0x");
-        for(int i = 0; i < 16; i++) { printf("%02x", derivedKey[i]); }
-        printf("\n");
-
-        printf("Plaintext hash: 0x");
-        for(int i = 0; i < 128; i++) { printf("%02x", ((uint8_t *)imgdata)[168108 + i]); }
-        printf("\n");
-
-        // encrypt the signature using the derived key
-        AES_set_encrypt_key(derivedKey, sizeof(key_uid) * 8, &encryptKey);
-        uint8_t ivec2[16] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
-        uint8_t res[128];
-        AES_cbc_encrypt(&imgdata[168108], &imgdata[168108], 0x80, &encryptKey, &ivec2, AES_ENCRYPT);
-
-        printf("Encrypted hash: 0x");
-        for(int i = 0; i < 128; i++) { printf("%02x", ((uint8_t *)imgdata)[168108 + i]); }
-        printf("\n");
-
-        // // decrypt again
-        // AES_set_decrypt_key(derivedKey, sizeof(key_uid) * 8, &decryptKey);
-        // uint8_t res2[128];
-        // uint8_t ivec3[16] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
-        // AES_cbc_encrypt(&imgdata[168108], &imgdata[168108], 0x80, &decryptKey, &ivec3, AES_DECRYPT);
-
-        // printf("Decrypted hash: 0x");
-        // for(int i = 0; i < 128; i++) { printf("%02x", ((uint8_t *)imgdata)[168108 + i]); }
-        // printf("\n");
+            printf("Encrypting signature at offset %d (%d bytes)\n", tag_offset + 12, tag[2]);
+            uint8_t ivec2[16] = {0};
+            AES_set_encrypt_key(derivedKey, sizeof(derivedKey) * 8, &key);
+            AES_cbc_encrypt((uint8_t *)&imgdata[tag_offset + 12], (uint8_t *)&imgdata[tag_offset + 12], tag[2], &key, ivec2, AES_ENCRYPT);
+            break;
+        }
+        if(tag[1] == 0) break;
+        tag_offset += tag[1];
     }
 
     // copy image
