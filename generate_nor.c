@@ -250,7 +250,7 @@ void add_img3(void *nor, char *filename, int *cur_block_ind) {
     img_header->size = img_length_in_blocks * NOR_BLOCK_SIZE; // the images should be aligned to a block
 
     // Images in NOR are personalized: the boot chain decrypts the signature (SHSH tag) with a key derived from the UID
-    // key before verifying it, so encrypt it with that key.
+    // key (key 0x89a: the seed below encrypted with the UID key) before verifying it, so encrypt it with that key.
     uint32_t tag_offset = 0x14;
     while(tag_offset + 12 <= fsize) {
         uint32_t *tag = (uint32_t *)&imgdata[tag_offset];
@@ -259,8 +259,8 @@ void add_img3(void *nor, char *filename, int *cur_block_ind) {
             unsigned char derivedKey[16];
             AES_KEY key;
             uint8_t ivec[16] = {0};
-            AES_set_decrypt_key(key_uid, sizeof(key_uid) * 8, &key);
-            AES_cbc_encrypt(derivedSeed, derivedKey, 16, &key, ivec, AES_DECRYPT);
+            AES_set_encrypt_key(key_uid, sizeof(key_uid) * 8, &key);
+            AES_cbc_encrypt(derivedSeed, derivedKey, 16, &key, ivec, AES_ENCRYPT);
 
             printf("Encrypting signature at offset %d (%d bytes)\n", tag_offset + 12, tag[2]);
             uint8_t ivec2[16] = {0};
